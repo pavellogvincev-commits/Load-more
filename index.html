@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Симулятор: Грузчики v2.3 (Деление с остатком)</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #1e1e2f; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .setup { background: #2a2a40; padding: 20px; border-radius: 10px; margin-bottom: 20px; text-align: center; }
+        .board { background: #2a2a40; padding: 20px; border-radius: 10px; width: 800px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: none; margin-bottom: 20px;}
+        .stats { display: flex; justify-content: space-around; font-size: 1.2em; margin-bottom: 15px; background: #3f3f5a; padding: 10px; border-radius: 8px; }
+        .highlight { color: #ffcc00; font-weight: bold; }
+        .danger { color: #ff4d4d; font-weight: bold; }
+        .players { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        .player-card { background: #3f3f5a; padding: 10px; border-radius: 8px; width: 140px; text-align: center; font-size: 0.9em; }
+        .human-card { border: 2px solid #4CAF50; }
+        .hand { display: flex; justify-content: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+        button { padding: 10px 15px; font-size: 1em; cursor: pointer; border: none; border-radius: 5px; background-color: #4CAF50; color: white; transition: 0.2s; }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        .btn-pass { background-color: #2196F3 !important; }
+        .btn-zero { background-color: #9c27b0 !important; }
+        .log-box { background: #111; padding: 10px; border-radius: 5px; height: 250px; overflow-y: auto; width: 800px; font-size: 0.9em; line-height: 1.4; color: #ccc; display: none;}
+        .discard { color: #aaa; font-size: 0.85em; margin-top: 5px; border-top: 1px solid #555; padding-top: 5px;}
+    </style>
+</head>
+<body>
+
+    <div class="setup" id="setup-screen">
+        <h2>Настройка игры</h2>
+        <label>Количество игроков: </label>
+        <select id="player-count">
+            <option value="3">3 игрока</option>
+            <option value="4" selected>4 игрока</option>
+            <option value="5">5 игроков</option>
+            <option value="6">6 игроков</option>
+        </select>
+        <br><br>
+        <button onclick="startGame()">Начать игру</button>
+    </div>
+
+    <div class="board" id="game-board">
+        <div class="stats">
+            <div>Осталось транспорта: <span id="ui-deck">0</span></div>
+            <div>Транспорт: <span id="ui-load">0</span> / <span id="ui-capacity" class="highlight">0</span></div>
+            <div>Премия: <span id="ui-premium" class="highlight">3</span> 💰</div>
+        </div>
+
+        <div class="players" id="players-container"></div>
+
+        <div>Ваши карты:</div>
+        <div class="hand" id="human-hand"></div>
+        
+        <button id="next-round-btn" onclick="nextRound()" style="display:none; margin: 15px auto; background:#e91e63;">Следующий раунд</button>
+    </div>
+
+    <div class="log-box" id="log"></div>
+
+<script>
+    const fullTransportDeck = [1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8];
+    const baseHand = ["1", "1", "2", "3", "0", "Пас"];
+    
+    let state = {
+        deck: [],
+        capacity: 0,
+        currentLoad: 0,
+        premium: 3,
+        players: [],
+        gameOver: false,
+        roundCounter: 0
+    };
+
+    function log(msg) {
+        const lb = document.getElementById("log");
+        lb.innerHTML += msg + "<br>";
+        lb.scrollTop = lb.scrollHeight;
+    }
+
+    function shuffle(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
+    function startGame() {
+        document.getElementById("setup-screen").style.display = "none";
+        document.getElementById("game-board").style.display = "block";
+        document.getElementById("log").style.display = "block";
+
+        let pCount = parseInt(document.getElementById("player-count").value);
+        
+        state.players = [{ id: "Вы", safe: 0, risk: 0, hand: [...baseHand], discard: [], isHuman: true }];
+        for(let i=1; i<pCount; i++) {
+            state.players.push({ id: "Бот " + i, safe: 0, risk: 0, hand: [...baseHand], discard: [], isHuman: false });
+        }
+
+        let shuffledTrans = shuffle([...fullTransportDeck]);
+        let selected7 = shuffledTrans.slice(0, 7);
+        let topPart = selected7.slice(0, 5);
+        let bottomPart = selected7.slice(5, 7);
+        bottomPart.push("КОНЕЦ");
+        bottomPart = shuffle(bottomPart);
+
+        state.deck = [...topPart, ...bottomPart];
+        state.premium = 3;
+        state.roundCounter = 0;
+        
+        log("<b>Игра началась! Колода сформирована (5-7 раундов).</b>");
+        nextRound();
+    }
+
+    function nextRound() {
+        if(state.deck.length === 0 || state.gameOver) return;
+
+        let nextCard = state.deck.shift();
+        if(nextCard === "КОНЕЦ") {
+            triggerGameOver();
+            return;
+        }
+
+        state.roundCounter++;
+        state.capacity = nextCard;
+        state.currentLoad = 0;
+        
+        document.getElementById("next-round-btn").style.display = "none";
+        log(`<hr><b style='color:#4CAF50'>=== РАУНД ${state.roundCounter} === Транспорт: ${state.capacity}</b>`);
+        updateUI();
+    }
+
+    function botAI(player) {
+        let remainingSpace = state.capacity - state.currentLoad;
+        let hand = player.hand;
+
+        if (hand.length === 1 && hand[0] === "Пас") return "Пас";
+        if (player.risk >= 4 && hand.includes("Пас") && Math.random() > 0.3) return "Пас";
+
+        if (remainingSpace <= 2) {
+            if (hand.includes("0") && Math.random() > 0.4) return "0";
+            if (hand.includes("Пас") && Math.random() > 0.5) return "Пас";
+            if (hand.includes("1")) return "1";
+        }
+
+        let validCards = hand.filter(c => c !== "Пас");
+        if (validCards.length === 0) validCards = hand;
+        return validCards[Math.floor(Math.random() * validCards.length)];
+    }
+
+    function playTurn(humanCardIndex) {
+        let turnCards = {};
+        let humanPlayer = state.players[0];
+        let hCard = humanPlayer.hand[humanCardIndex];
+        humanPlayer.hand.splice(humanCardIndex, 1);
+        turnCards[humanPlayer.id] = hCard;
+
+        for(let i=1; i<state.players.length; i++) {
+            let bot = state.players[i];
+            let bCard = botAI(bot);
+            bot.hand.splice(bot.hand.indexOf(bCard), 1);
+            turnCards[bot.id] = bCard;
+        }
+
+        let msg = "<b>Сыграли:</b> ";
+        let turnSum = 0;
+        for (let pId in turnCards) {
+            let c = turnCards[pId];
+            msg += `${pId} [${c}], `;
+            if(c !== "Пас" && c !== "0") turnSum += parseInt(c);
+        }
+        log(msg);
+
+        // ПЕРЕГРУЗ
+        if (state.currentLoad + turnSum > state.capacity) {
+            let remainingBeforeOverload = state.capacity - state.currentLoad;
+            log(`<span class="danger">💥 ПЕРЕГРУЗ! (${state.currentLoad + turnSum} / ${state.capacity})</span>`);
+            
+            let zeroPlayers = [];
+            state.players.forEach(p => {
+                let played = turnCards[p.id];
+                if (played === "Пас") {
+                    p.safe += p.risk; p.risk = 0;
+                    p.hand = [...baseHand]; p.discard = [];
+                    log(`🛡️ ${p.id} ПАС - спас монеты!`);
+                } else if (played === "0") {
+                    p.discard.push("0");
+                    zeroPlayers.push(p);
+                } else {
+                    p.discard.push(played);
+                    p.risk = 0; 
+                }
+            });
+
+            // Деление премии с остатком при нулях
+            if (zeroPlayers.length > 0) {
+                let split = Math.floor(state.premium / zeroPlayers.length);
+                if (split > 0) {
+                    zeroPlayers.forEach(p => { p.risk += split; });
+                    state.premium = state.premium % zeroPlayers.length; // Остаток от деления
+                    log(`💰 ${zeroPlayers.length} игр. сыграли "0". Каждый получает по ${split} в риск. Остаток премии: ${state.premium}`);
+                } else {
+                    log(`⚖️ Премия (${state.premium}) слишком мала для ${zeroPlayers.length} игроков. Никто ничего не получает, премия остается.`);
+                }
+            }
+
+            let newPremiumBonus = remainingBeforeOverload + 3;
+            state.premium += newPremiumBonus;
+            log(`<i>Транспорт сломан. В премию добавлено: недогруз (${remainingBeforeOverload}) + 3 = ${newPremiumBonus}. Итого: ${state.premium}</i>`);
+            
+            endRound();
+            return;
+        }
+
+        // БЕЗ ПЕРЕГРУЗА
+        state.currentLoad += turnSum;
+        state.players.forEach(p => {
+            let played = turnCards[p.id];
+            if (played === "Пас") {
+                p.safe += p.risk; p.risk = 0;
+                p.hand = [...baseHand]; p.discard = [];
+                log(`🛡️ ${p.id} ПАС.`);
+            } else {
+                p.discard.push(played); 
+                if (played !== "0") p.risk += parseInt(played);
+            }
+        });
+
+        log(`Загружено: ${state.currentLoad} / ${state.capacity}`);
+
+        // ТОЧНАЯ ЗАГРУЗКА
+        if (state.currentLoad === state.capacity) {
+            log(`<span class="highlight">✨ ТОЧНАЯ ЗАГРУЗКА!</span>`);
+            let active = state.players.filter(p => turnCards[p.id] !== "Пас" && turnCards[p.id] !== "0");
+            
+            if(active.length > 0) {
+                let split = Math.floor(state.premium / active.length);
+                if (split > 0) {
+                    active.forEach(p => { p.risk += split; });
+                    state.premium = state.premium % active.length; // Остаток от деления
+                    log(`💰 Премия поделена: каждый из ${active.length} активных получает по ${split} в риск. Остаток: ${state.premium}`);
+                } else {
+                    log(`⚖️ Премия (${state.premium}) слишком мала для ${active.length} игроков. Никто ничего не получает.`);
+                }
+            }
+            state.premium += 3; // Базовая премия
+            log(`<i>В фонд следующего раунда добавлено 3 монеты. Итого: ${state.premium}</i>`);
+            endRound();
+        } else {
+            updateUI();
+        }
+    }
+
+    function endRound() {
+        document.getElementById("next-round-btn").style.display = "block";
+        document.getElementById("human-hand").innerHTML = ""; 
+        updateUI();
+    }
+
+    function triggerGameOver() {
+        state.gameOver = true;
+        log(`<hr><b style='color:#ffcc00; font-size:1.2em'>🚨 КАРТА "КОНЕЦ ИГРЫ"! ПОДСЧЕТ ОЧКОВ 🚨</b>`);
+        
+        state.players.forEach(p => {
+            p.safe += p.risk; p.risk = 0;
+        });
+
+        let sorted = [...state.players].sort((a, b) => b.safe - a.safe);
+        sorted.forEach((p, idx) => {
+            log(`${idx + 1} место: ${p.id} — ${p.safe} монет`);
+        });
+
+        document.getElementById("next-round-btn").style.display = "none";
+        document.getElementById("human-hand").innerHTML = "<b style='color:#ffcc00'>ИГРА ОКОНЧЕНА</b>";
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById("ui-deck").innerText = state.deck.length;
+        document.getElementById("ui-capacity").innerText = state.capacity;
+        document.getElementById("ui-load").innerText = state.currentLoad;
+        document.getElementById("ui-premium").innerText = state.premium;
+
+        let pCont = document.getElementById("players-container");
+        pCont.innerHTML = "";
+        state.players.forEach(p => {
+            let div = document.createElement("div");
+            div.className = "player-card " + (p.isHuman ? "human-card" : "");
+            let tableCards = p.discard.length > 0 ? p.discard.join(', ') : 'нет';
+            div.innerHTML = `<b>${p.id}</b><br>Сейф: ${p.safe}<br>Риск: <span class="danger">${p.risk}</span><div class="discard">На столе: ${tableCards}</div>`;
+            pCont.appendChild(div);
+        });
+
+        let hHand = document.getElementById("human-hand");
+        if(!state.gameOver && document.getElementById("next-round-btn").style.display === "none") {
+            hHand.innerHTML = "";
+            state.players[0].hand.forEach((card, idx) => {
+                let btn = document.createElement("button");
+                btn.innerText = card;
+                btn.className = (card === "Пас" ? "btn-pass" : card === "0" ? "btn-zero" : "");
+                btn.style.margin = "0 5px";
+                btn.onclick = () => playTurn(idx);
+                hHand.appendChild(btn);
+            });
+        }
+    }
+</script>
+</body>
+</html>
