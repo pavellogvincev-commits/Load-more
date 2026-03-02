@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Dev Tool: Умная Симуляция "Грузчики"</title>
+    <title>Dev Tool: Умная Симуляция "Грузчики" (Патч Премии)</title>
     <style>
         body { font-family: sans-serif; background: #1e1e2f; color: white; padding: 20px; text-align: center; }
         .panel { background: #2a2a40; padding: 20px; border-radius: 10px; max-width: 700px; margin: 0 auto; }
@@ -17,8 +17,8 @@
 <body>
 
 <div class="panel">
-    <h2>Умный тест баланса (1000 партий)</h2>
-    <p>Участвуют 4 продвинутых ИИ-бота. Они читают стол и следят за премией.</p>
+    <h2>Тест баланса (Патч: Фиксированная премия)</h2>
+    <p>Мы порезали Премию. Теперь при перегрузе в фонд идет только 3 монеты. Сможет ли Снайпер выжить?</p>
     <button onclick="runSimulation(1000)">🚀 Симулировать 1000 игр</button>
 
     <table id="results-table" style="display:none;">
@@ -32,14 +32,13 @@
         </thead>
         <tbody id="results-body"></tbody>
     </table>
-    <div class="log" id="status">Готов к запуску новой меты...</div>
+    <div class="log" id="status">Ждем запуска симуляции...</div>
 </div>
 
 <script>
     const fullTransportDeck = [1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8];
     const baseHand = ["1", "1", "2", "3", "0", "Пас"];
 
-    // Умные мозги ботов
     function botAI(player, capacity, currentLoad, premium, allPlayers, round) {
         let hand = player.hand;
         let remSpace = capacity - currentLoad;
@@ -47,46 +46,40 @@
         
         if (hand.length === 1 && hand[0] === "Пас") return "Пас";
 
-        // 1. Темповик (Гибкий агрессор)
+        // 1. Темповик
         if (player.strategy === "Темповик") {
             if (remSpace > 3) {
                 if (hand.includes("3")) return "3";
                 if (hand.includes("2")) return "2";
             } else {
-                if (player.risk >= 3 && hand.includes("Пас")) return "Пас"; // Резко сейвится
+                if (player.risk >= 3 && hand.includes("Пас")) return "Пас";
                 if (hand.includes("1")) return "1";
             }
         }
 
-        // 2. Эгоист (Анти-Снайпер)
+        // 2. Эгоист
         if (player.strategy === "Эгоист") {
-            // Если премия жирная и пахнет перегрузом - специально пасует, чтобы не кормить Снайпера
             if (premium >= 5 && remSpace <= 2 && hand.includes("Пас")) return "Пас";
-            // Если сам может забрать премию без конкурентов - пробует
             if (remSpace <= 2 && hand.includes("0") && Math.random() > 0.5) return "0";
             if (player.risk >= 4 && hand.includes("Пас")) return "Пас";
             if (hand.includes("2")) return "2";
         }
 
-        // 3. Счетовод (Аналитик)
+        // 3. Счетовод
         if (player.strategy === "Счетовод") {
-            // Считает, сколько "3" уже вышло на стол
             let threesPlayed = 0;
             allPlayers.forEach(p => { if (p.discard.includes("3")) threesPlayed++; });
-            
-            // Если почти все тройки вышли, риск перегруза минимален
             if (threesPlayed >= 2 && remSpace >= 2) {
                 if (hand.includes("3")) return "3";
                 if (hand.includes("2")) return "2";
             }
-            // Если риск велик - прячется
             if (remSpace <= 2) {
                 if (hand.includes("0")) return "0";
                 if (hand.includes("Пас")) return "Пас";
             }
         }
 
-        // 4. Снайпер (Классика - оставили для сравнения)
+        // 4. Снайпер
         if (player.strategy === "Снайпер") {
             if (remSpace <= 2 && hand.includes("0")) return "0";
             if (premium >= 6 && hand.includes("0")) return "0"; 
@@ -94,7 +87,6 @@
             if (hand.includes("1")) return "1"; 
         }
 
-        // Дефолт (страховка)
         return valid.length > 0 ? valid[Math.floor(Math.random() * valid.length)] : "Пас";
     }
 
@@ -141,6 +133,7 @@
                 });
 
                 if (currentLoad + turnSum > capacity) { 
+                    // ПЕРЕГРУЗ
                     let zeroPlayers = [];
                     players.forEach(p => {
                         let c = turnCards[p.strategy];
@@ -148,16 +141,21 @@
                         else if (c === "0") { p.discard.push("0"); zeroPlayers.push(p); }
                         else { p.discard.push(c); p.risk = 0; }
                     });
+                    
                     if (zeroPlayers.length > 0) {
                         let split = Math.floor(premium / zeroPlayers.length);
                         if(split > 0) {
                             zeroPlayers.forEach(p => p.risk += split);
-                            premium = premium % zeroPlayers.length;
+                            premium = premium % zeroPlayers.length; // Остаток остается
                         }
                     }
-                    premium += (capacity - currentLoad) + 3;
+                    
+                    // НОВОЕ ПРАВИЛО: Премия растет только на 3 монеты (недогруз сгорает)
+                    premium += 3;
                     roundActive = false;
+
                 } else { 
+                    // БЕЗ ПЕРЕГРУЗА
                     currentLoad += turnSum;
                     players.forEach(p => {
                         let c = turnCards[p.strategy];
@@ -169,12 +167,13 @@
                     });
 
                     if (currentLoad === capacity) { 
+                        // ТОЧНАЯ ЗАГРУЗКА
                         let active = players.filter(p => turnCards[p.strategy] !== "Пас" && turnCards[p.strategy] !== "0");
                         if(active.length > 0) {
                             let split = Math.floor(premium / active.length);
                             if(split > 0) {
                                 active.forEach(p => p.risk += split);
-                                premium = premium % active.length;
+                                premium = premium % active.length; // Остаток
                             }
                         }
                         premium += 3;
@@ -190,7 +189,7 @@
     }
 
     function runSimulation(iterations) {
-        document.getElementById("status").innerText = "Матрица работает... Считаем умных ботов!";
+        document.getElementById("status").innerText = "Тестируем новую экономику... Ждите.";
         
         setTimeout(() => {
             let stats = {
@@ -227,7 +226,7 @@
             }
 
             document.getElementById("results-table").style.display = "table";
-            document.getElementById("status").innerText = "Готово! Посмотри, как упал винрейт Снайпера.";
+            document.getElementById("status").innerText = "Готово! Снайпер должен страдать.";
         }, 100);
     }
 </script>
