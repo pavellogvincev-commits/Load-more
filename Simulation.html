@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Dev Tool: Симулятор баланса "Грузчики"</title>
+    <style>
+        body { font-family: sans-serif; background: #1e1e2f; color: white; padding: 20px; text-align: center; }
+        .panel { background: #2a2a40; padding: 20px; border-radius: 10px; max-width: 600px; margin: 0 auto; }
+        button { padding: 15px 30px; font-size: 1.2em; background: #e91e63; color: white; border: none; border-radius: 5px; cursor: pointer; margin-bottom: 20px;}
+        button:hover { background: #c2185b; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #3f3f5a; }
+        th, td { padding: 10px; border: 1px solid #555; text-align: center; }
+        th { background: #111; color: #ffcc00; }
+        .log { margin-top: 20px; font-size: 0.9em; color: #aaa; text-align: left; background: #111; padding: 10px; border-radius: 5px;}
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h2>Тест баланса (1000 партий)</h2>
+    <p>Участвуют 3 ИИ-бота с разными стратегиями.</p>
+    <button onclick="runSimulation(1000)">🚀 Симулировать 1000 игр</button>
+
+    <table id="results-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>Стратегия</th>
+                <th>Побед</th>
+                <th>Винрейт (%)</th>
+                <th>Ср. счет победы</th>
+            </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+    </table>
+    <div class="log" id="status">Готов к запуску...</div>
+</div>
+
+<script>
+    const fullTransportDeck = [1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8];
+    const baseHand = ["1", "1", "2", "3", "0", "Пас"];
+
+    // Логика разных характеров
+    function botAI(player, capacity, currentLoad, premium) {
+        let hand = player.hand;
+        let remSpace = capacity - currentLoad;
+        let valid = hand.filter(c => c !== "Пас");
+
+        if (hand.length === 1 && hand[0] === "Пас") return "Пас";
+
+        if (player.strategy === "Трус") {
+            if (player.risk >= 2 && hand.includes("Пас")) return "Пас";
+            if (hand.includes("1")) return "1";
+            if (valid.length > 0) return valid[Math.floor(Math.random() * valid.length)];
+            return "Пас";
+        }
+
+        if (player.strategy === "Снайпер") {
+            if (remSpace <= 2 && hand.includes("0")) return "0";
+            if (premium >= 6 && hand.includes("0")) return "0"; // Блеф ради премии
+            if (player.risk >= 5 && hand.includes("Пас")) return "Пас";
+            if (hand.includes("1")) return "1"; // Сидит тихо
+            if (valid.length > 0) return valid[0];
+            return "Пас";
+        }
+
+        if (player.strategy === "Агрессор") {
+            if (player.risk >= 5 && hand.includes("Пас")) return "Пас";
+            if (hand.includes("3")) return "3";
+            if (hand.includes("2")) return "2";
+            if (valid.length > 0) return valid[Math.floor(Math.random() * valid.length)];
+            return "Пас";
+        }
+
+        // Дефолт (если что-то пошло не так)
+        return valid.length > 0 ? valid[Math.floor(Math.random() * valid.length)] : "Пас";
+    }
+
+    // Движок одной игры (без интерфейса)
+    function playOneGame() {
+        let players = [
+            { id: "Бот 1", strategy: "Трус", safe: 0, risk: 0, hand: [...baseHand] },
+            { id: "Бот 2", strategy: "Снайпер", safe: 0, risk: 0, hand: [...baseHand] },
+            { id: "Бот 3", strategy: "Агрессор", safe: 0, risk: 0, hand: [...baseHand] }
+        ];
+
+        let deck = [...fullTransportDeck].sort(() => Math.random() - 0.5).slice(0,7);
+        let top = deck.slice(0,5);
+        let bot = deck.slice(5,7);
+        bot.push("КОНЕЦ");
+        bot.sort(() => Math.random() - 0.5);
+        deck = [...top, ...bot];
+
+        let premium = 3;
+
+        for (let round = 0; round < deck.length; round++) {
+            let nextCard = deck[round];
+            if (nextCard === "КОНЕЦ") break;
+
+            let capacity = nextCard;
+            let currentLoad = 0;
+            players.forEach(p => p.hand = [...baseHand]);
+
+            let roundActive = true;
+            let safetyValve = 0; // Защита от бесконечного цикла
+
+            while (roundActive && safetyValve < 20) {
+                safetyValve++;
+                let turnCards = {};
+                let turnSum = 0;
+
+                players.forEach(p => {
+                    let card = botAI(p, capacity, currentLoad, premium);
+                    p.hand.splice(p.hand.indexOf(card), 1);
+                    turnCards[p.strategy] = card;
+                    if (card !== "Пас" && card !== "0") turnSum += parseInt(card);
+                });
+
+                if (currentLoad + turnSum > capacity) { // Перегруз
+                    let zeroPlayers = [];
+                    players.forEach(p => {
+                        let c = turnCards[p.strategy];
+                        if (c === "Пас") { p.safe += p.risk; p.risk = 0; p.hand = [...baseHand]; }
+                        else if (c === "0") zeroPlayers.push(p);
+                        else p.risk = 0;
+                    });
+                    if (zeroPlayers.length > 0) {
+                        let split = Math.floor(premium / zeroPlayers.length);
+                        zeroPlayers.forEach(p => p.risk += split);
+                        premium = premium % zeroPlayers.length;
+                    }
+                    premium += (capacity - currentLoad) + 3;
+                    roundActive = false;
+                } else { // Успех хода
+                    currentLoad += turnSum;
+                    players.forEach(p => {
+                        let c = turnCards[p.strategy];
+                        if (c === "Пас") { p.safe += p.risk; p.risk = 0; p.hand = [...baseHand]; }
+                        else if (c !== "0") p.risk += parseInt(c);
+                    });
+
+                    if (currentLoad === capacity) { // Точно
+                        let active = players.filter(p => turnCards[p.strategy] !== "Пас" && turnCards[p.strategy] !== "0");
+                        if(active.length > 0) {
+                            let split = Math.floor(premium / active.length);
+                            active.forEach(p => p.risk += split);
+                            premium = premium % active.length;
+                        }
+                        premium += 3;
+                        roundActive = false;
+                    }
+                }
+            }
+        }
+
+        // Конец игры
+        players.forEach(p => { p.safe += p.risk; });
+        players.sort((a, b) => b.safe - a.safe);
+        return players; // Возвращаем результаты отсортированными по победе
+    }
+
+    function runSimulation(iterations) {
+        document.getElementById("status").innerText = "Симуляция идет... (Считаю математику)";
+        
+        // Даем браузеру долю секунды обновить текст, прежде чем он зависнет в цикле
+        setTimeout(() => {
+            let stats = {
+                "Трус": { wins: 0, totalScore: 0 },
+                "Снайпер": { wins: 0, totalScore: 0 },
+                "Агрессор": { wins: 0, totalScore: 0 }
+            };
+
+            for (let i = 0; i < iterations; i++) {
+                let results = playOneGame();
+                let winner = results[0]; // Первое место
+                
+                stats[winner.strategy].wins += 1;
+                
+                // Записываем средний счет для статистики
+                results.forEach(p => {
+                    stats[p.strategy].totalScore += p.safe;
+                });
+            }
+
+            // Вывод на экран
+            let tbody = document.getElementById("results-body");
+            tbody.innerHTML = "";
+            
+            for (let strat in stats) {
+                let s = stats[strat];
+                let tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td><b>${strat}</b></td>
+                    <td>${s.wins}</td>
+                    <td>${((s.wins / iterations) * 100).toFixed(1)}%</td>
+                    <td>${(s.totalScore / iterations).toFixed(1)} монет</td>
+                `;
+                tbody.appendChild(tr);
+            }
+
+            document.getElementById("results-table").style.display = "table";
+            document.getElementById("status").innerText = "Симуляция завершена!";
+        }, 100);
+    }
+</script>
+
+</body>
+</html>
