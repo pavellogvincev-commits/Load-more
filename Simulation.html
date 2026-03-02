@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Dev Tool: Умная Симуляция "Грузчики" (Патч Премии)</title>
+    <title>Dev Tool: Вероятностная Симуляция "Грузчики"</title>
     <style>
         body { font-family: sans-serif; background: #1e1e2f; color: white; padding: 20px; text-align: center; }
         .panel { background: #2a2a40; padding: 20px; border-radius: 10px; max-width: 700px; margin: 0 auto; }
@@ -17,8 +17,8 @@
 <body>
 
 <div class="panel">
-    <h2>Тест баланса (Патч: Фиксированная премия)</h2>
-    <p>Мы порезали Премию. Теперь при перегрузе в фонд идет только 3 монеты. Сможет ли Снайпер выжить?</p>
+    <h2>Тест баланса (Гибкие ИИ + Лорный "0")</h2>
+    <p>Нули снова защищают Зону Риска. Боты стали действовать не по скрипту, а с долей вероятности.</p>
     <button onclick="runSimulation(1000)">🚀 Симулировать 1000 игр</button>
 
     <table id="results-table" style="display:none;">
@@ -32,69 +32,88 @@
         </thead>
         <tbody id="results-body"></tbody>
     </table>
-    <div class="log" id="status">Ждем запуска симуляции...</div>
+    <div class="log" id="status">Ожидание запуска...</div>
 </div>
 
 <script>
     const fullTransportDeck = [1, 2, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8];
     const baseHand = ["1", "1", "2", "3", "0", "Пас"];
 
-    function botAI(player, capacity, currentLoad, premium, allPlayers, round) {
+    // Вспомогательная функция для броска кубика (проценты)
+    function chance(percent) {
+        return Math.random() * 100 < percent;
+    }
+
+    function botAI(player, capacity, currentLoad, premium) {
         let hand = player.hand;
         let remSpace = capacity - currentLoad;
         let valid = hand.filter(c => c !== "Пас");
         
+        // Если остался только Пас - без вариантов
         if (hand.length === 1 && hand[0] === "Пас") return "Пас";
 
-        // 1. Темповик
-        if (player.strategy === "Темповик") {
-            if (remSpace > 3) {
+        // 1. АГРЕССОР (Вероятностный)
+        if (player.strategy === "Агрессор") {
+            // Если места много, в 60% случаев бьет сильно
+            if (remSpace > 3 && chance(60)) {
                 if (hand.includes("3")) return "3";
                 if (hand.includes("2")) return "2";
-            } else {
-                if (player.risk >= 3 && hand.includes("Пас")) return "Пас";
+            }
+            // Если места мало, просыпается разум (не хочет убиться сам)
+            if (remSpace <= 2) {
+                if (chance(50) && hand.includes("Пас")) return "Пас";
                 if (hand.includes("1")) return "1";
             }
+            // Если накопил денег - иногда может и засейвить
+            if (player.risk >= 4 && chance(40) && hand.includes("Пас")) return "Пас";
         }
 
-        // 2. Эгоист
-        if (player.strategy === "Эгоист") {
-            if (premium >= 5 && remSpace <= 2 && hand.includes("Пас")) return "Пас";
-            if (remSpace <= 2 && hand.includes("0") && Math.random() > 0.5) return "0";
-            if (player.risk >= 4 && hand.includes("Пас")) return "Пас";
-            if (hand.includes("2")) return "2";
-        }
-
-        // 3. Счетовод
-        if (player.strategy === "Счетовод") {
-            let threesPlayed = 0;
-            allPlayers.forEach(p => { if (p.discard.includes("3")) threesPlayed++; });
-            if (threesPlayed >= 2 && remSpace >= 2) {
-                if (hand.includes("3")) return "3";
+        // 2. СНАЙПЕР (Скрытный)
+        if (player.strategy === "Снайпер") {
+            // Маскируется под нормального, если места много
+            if (remSpace > 2 && chance(70)) {
+                if (hand.includes("1")) return "1";
                 if (hand.includes("2")) return "2";
             }
-            if (remSpace <= 2) {
-                if (hand.includes("0")) return "0";
-                if (hand.includes("Пас")) return "Пас";
+            // Бьет нулем только когда горячо
+            if (remSpace <= 2 && chance(80) && hand.includes("0")) return "0";
+            if (premium >= 6 && chance(60) && hand.includes("0")) return "0"; 
+            
+            // Если нуля нет или шанс не прокнул - сейвится
+            if (player.risk >= 4 && chance(70) && hand.includes("Пас")) return "Пас";
+        }
+
+        // 3. ОСТОРОЖНЫЙ
+        if (player.strategy === "Осторожный") {
+            // Пасует в зависимости от жадности в данный момент
+            if (player.risk >= 5 && chance(90) && hand.includes("Пас")) return "Пас";
+            if (player.risk >= 3 && chance(50) && hand.includes("Пас")) return "Пас";
+            
+            // Предпочитает мелкие карты
+            if (remSpace > 1 && chance(80)) {
+                if (hand.includes("1")) return "1";
+                if (hand.includes("0")) return "0"; // Иногда блефует
             }
         }
 
-        // 4. Снайпер
-        if (player.strategy === "Снайпер") {
-            if (remSpace <= 2 && hand.includes("0")) return "0";
-            if (premium >= 6 && hand.includes("0")) return "0"; 
-            if (player.risk >= 5 && hand.includes("Пас")) return "Пас";
-            if (hand.includes("1")) return "1"; 
+        // 4. ХИТРЕЦ (Хаос)
+        if (player.strategy === "Хитрец") {
+            if (chance(33) && hand.includes("Пас")) return "Пас";
+            if (chance(33) && remSpace <= 2 && hand.includes("0")) return "0";
+            if (chance(33) && hand.includes("3")) return "3";
         }
 
-        return valid.length > 0 ? valid[Math.floor(Math.random() * valid.length)] : "Пас";
+        // ФОЛБЕК: Здравый смысл для всех (если их логика не сработала)
+        if (player.risk >= 6 && hand.includes("Пас")) return "Пас"; // Огромный куш спасают все
+        if (valid.length > 0) return valid[Math.floor(Math.random() * valid.length)];
+        return "Пас";
     }
 
     function playOneGame() {
         let players = [
-            { id: "Бот 1", strategy: "Темповик", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
-            { id: "Бот 2", strategy: "Эгоист", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
-            { id: "Бот 3", strategy: "Счетовод", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
+            { id: "Бот 1", strategy: "Агрессор", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
+            { id: "Бот 2", strategy: "Осторожный", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
+            { id: "Бот 3", strategy: "Хитрец", safe: 0, risk: 0, hand: [...baseHand], discard: [] },
             { id: "Бот 4", strategy: "Снайпер", safe: 0, risk: 0, hand: [...baseHand], discard: [] }
         ];
 
@@ -106,13 +125,11 @@
         deck = [...top, ...bot];
 
         let premium = 3;
-        let roundCounter = 0;
 
         for (let round = 0; round < deck.length; round++) {
             let nextCard = deck[round];
             if (nextCard === "КОНЕЦ") break;
 
-            roundCounter++;
             let capacity = nextCard;
             let currentLoad = 0;
             players.forEach(p => { p.hand = [...baseHand]; p.discard = []; });
@@ -126,36 +143,42 @@
                 let turnSum = 0;
 
                 players.forEach(p => {
-                    let card = botAI(p, capacity, currentLoad, premium, players, roundCounter);
+                    let card = botAI(p, capacity, currentLoad, premium);
                     p.hand.splice(p.hand.indexOf(card), 1);
                     turnCards[p.strategy] = card;
                     if (card !== "Пас" && card !== "0") turnSum += parseInt(card);
                 });
 
                 if (currentLoad + turnSum > capacity) { 
-                    // ПЕРЕГРУЗ
+                    // ВОЗВРАЩЕНО ПРАВИЛО: "0" сохраняет риск
                     let zeroPlayers = [];
                     players.forEach(p => {
                         let c = turnCards[p.strategy];
-                        if (c === "Пас") { p.safe += p.risk; p.risk = 0; p.hand = [...baseHand]; p.discard = []; }
-                        else if (c === "0") { p.discard.push("0"); zeroPlayers.push(p); }
-                        else { p.discard.push(c); p.risk = 0; }
+                        if (c === "Пас") { 
+                            p.safe += p.risk; p.risk = 0; p.hand = [...baseHand]; p.discard = []; 
+                        } else if (c === "0") { 
+                            p.discard.push("0"); 
+                            zeroPlayers.push(p); 
+                            // Заметь: p.risk НЕ обнуляется. Он в безопасности!
+                        } else { 
+                            p.discard.push(c); 
+                            p.risk = 0; // Сгорают только те, кто кинул цифры
+                        }
                     });
                     
                     if (zeroPlayers.length > 0) {
                         let split = Math.floor(premium / zeroPlayers.length);
                         if(split > 0) {
                             zeroPlayers.forEach(p => p.risk += split);
-                            premium = premium % zeroPlayers.length; // Остаток остается
+                            premium = premium % zeroPlayers.length; 
                         }
                     }
                     
-                    // НОВОЕ ПРАВИЛО: Премия растет только на 3 монеты (недогруз сгорает)
+                    // Премия растет ровно на 3 (недогруз сгорает)
                     premium += 3;
                     roundActive = false;
 
                 } else { 
-                    // БЕЗ ПЕРЕГРУЗА
                     currentLoad += turnSum;
                     players.forEach(p => {
                         let c = turnCards[p.strategy];
@@ -167,13 +190,12 @@
                     });
 
                     if (currentLoad === capacity) { 
-                        // ТОЧНАЯ ЗАГРУЗКА
                         let active = players.filter(p => turnCards[p.strategy] !== "Пас" && turnCards[p.strategy] !== "0");
                         if(active.length > 0) {
                             let split = Math.floor(premium / active.length);
                             if(split > 0) {
                                 active.forEach(p => p.risk += split);
-                                premium = premium % active.length; // Остаток
+                                premium = premium % active.length;
                             }
                         }
                         premium += 3;
@@ -189,13 +211,13 @@
     }
 
     function runSimulation(iterations) {
-        document.getElementById("status").innerText = "Тестируем новую экономику... Ждите.";
+        document.getElementById("status").innerText = "Тестируем нечеткую логику... Ждите.";
         
         setTimeout(() => {
             let stats = {
-                "Темповик": { wins: 0, totalScore: 0 },
-                "Эгоист": { wins: 0, totalScore: 0 },
-                "Счетовод": { wins: 0, totalScore: 0 },
+                "Агрессор": { wins: 0, totalScore: 0 },
+                "Осторожный": { wins: 0, totalScore: 0 },
+                "Хитрец": { wins: 0, totalScore: 0 },
                 "Снайпер": { wins: 0, totalScore: 0 }
             };
 
@@ -226,7 +248,7 @@
             }
 
             document.getElementById("results-table").style.display = "table";
-            document.getElementById("status").innerText = "Готово! Снайпер должен страдать.";
+            document.getElementById("status").innerText = "Готово! Как тебе новые вероятности?";
         }, 100);
     }
 </script>
